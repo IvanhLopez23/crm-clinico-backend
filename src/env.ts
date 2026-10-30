@@ -10,7 +10,7 @@ try {
 const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   PORT: z.coerce.number().int().positive().default(3000),
-  HOST: z.enum(["192.168.0.68"]).default("192.168.0.68"),
+  HOST: z.string().min(1).default("0.0.0.0"),
   LOG_LEVEL: z
     .enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"])
     .default("info"),
@@ -31,6 +31,17 @@ const envSchema = z.object({
    */
   WORKER_DATABASE_URL: z.string().min(1).optional(),
   WORKER_INTERVAL_MS: z.coerce.number().int().min(1000).default(30_000),
+  /**
+   * Bootstrap del primer superadmin de plataforma al arrancar el servidor.
+   * Solo crea el usuario si no existe; nunca cambia su contrasena.
+   */
+  PLATFORM_ADMIN_BOOTSTRAP: z
+    .enum(["true", "false"])
+    .default("true")
+    .transform((value) => value === "true"),
+  PLATFORM_ADMIN_EMAIL: z.email().max(254).optional(),
+  PLATFORM_ADMIN_PASSWORD: z.string().min(8).optional(),
+  PLATFORM_ADMIN_NAME: z.string().min(1).default("Administrador de plataforma"),
 });
 
 export const env = envSchema.parse(process.env);

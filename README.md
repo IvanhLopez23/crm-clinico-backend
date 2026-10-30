@@ -20,13 +20,28 @@ anti doble-reserva garantizada en PostgreSQL.
 
 ```bash
 pnpm install
+cp .env.example .env
 pnpm db:up        # Postgres en localhost:5433
 pnpm db:migrate   # aplica migraciones como postgres (owner)
 pnpm dev          # http://localhost:3000
 ```
 
-`.env` ya trae las URLs locales. El rol `crm_app` (sin privilegios) es el que
-usa la API; las migraciones usan `postgres`.
+`.env.example` ya trae las URLs locales y las credenciales del superadmin de
+desarrollo. El rol `crm_app` (sin privilegios) es el que usa la API; las
+migraciones usan `postgres`.
+
+Al arrancar, el servidor garantiza que exista el **superadmin de plataforma**
+con las variables `PLATFORM_ADMIN_EMAIL`, `PLATFORM_ADMIN_PASSWORD` y
+`PLATFORM_ADMIN_NAME`. Solo lo crea si no existe; reiniciar no cambia su
+contrasena. En desarrollo el `.env` trae `plataforma@demo.local` /
+`PasswordSegura123`. Para desactivarlo: `PLATFORM_ADMIN_BOOTSTRAP=false`.
+
+```bash
+# bootstrap manual (idempotente, usa MIGRATION_DATABASE_URL)
+pnpm platform:bootstrap
+# o con credenciales explicitas
+pnpm platform:bootstrap -- plataforma@clinica.com PasswordSegura123 "Admin Plataforma"
+```
 
 ### Datos demo
 
@@ -239,8 +254,11 @@ vigentes hasta expirar.
 ## Panel de plataforma (SaaS multiempresa)
 
 ```bash
-# crear el primer administrador de plataforma
+# crear el primer administrador de plataforma manualmente (opcional)
 pnpm platform:admin plataforma@clinica.com PasswordSegura123 "Admin Plataforma"
+
+# o usar el bootstrap idempotente
+pnpm platform:bootstrap
 
 # login (mismo endpoint; devuelve scope=platform)
 curl -X POST http://localhost:3000/api/v1/auth/login \

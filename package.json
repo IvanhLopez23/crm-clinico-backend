@@ -13,6 +13,7 @@
     "worker": "tsx src/worker.ts",
     "user:create": "tsx src/scripts/create-user.ts",
     "platform:admin": "tsx src/scripts/create-platform-admin.ts",
+    "platform:bootstrap": "tsx src/scripts/bootstrap-platform-admin.ts",
     "seed:demo": "tsx src/scripts/seed-demo.ts",
     "backfill:phase1": "tsx src/scripts/backfill-phase1.ts",
     "build": "tsc -p tsconfig.build.json",
