@@ -1,0 +1,31 @@
+# Dependencias
+node_modules/
+
+# Compilación
+dist/
+*.tsbuildinfo
+
+# Tests
+coverage/
+.vitest/
+
+# Variables de entorno
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Datos locales de Docker
+docker/data/
+
+# Sistema y editores
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
