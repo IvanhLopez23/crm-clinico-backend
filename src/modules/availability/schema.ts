@@ -89,24 +89,84 @@ export const blocksQuery = z.object({
   to: isoDateTime,
 });
 
-export const createBlockBody = z.object({
-  practitionerId: z.uuid(),
-  startsAt: isoDateTime,
-  endsAt: isoDateTime,
-  type: z
-    .enum([
-      "vacation",
-      "meeting",
-      "surgery",
-      "personal",
-      "holiday",
-      "maintenance",
-      "break",
-      "other",
-    ])
-    .default("other"),
-  reason: z.string().max(500).optional(),
-});
+export const createBlockBody = z
+  .object({
+    practitionerId: z.uuid(),
+    /** Modo anterior: fechas absolutas. */
+    startsAt: isoDateTime.optional(),
+    endsAt: isoDateTime.optional(),
+    /** Modo dia/rango local de la clinica. */
+    startDate: isoDate.optional(),
+    endDate: isoDate.optional(),
+    startAllDay: z.boolean().default(false),
+    endAllDay: z.boolean().default(false),
+    startTime: timeHm.optional(),
+    endTime: timeHm.optional(),
+    type: z
+      .enum([
+        "vacation",
+        "meeting",
+        "surgery",
+        "personal",
+        "holiday",
+        "maintenance",
+        "break",
+        "other",
+      ])
+      .default("other"),
+    reason: z.string().max(500).optional(),
+  })
+  .superRefine((value, ctx) => {
+    const hasAbsoluteRange =
+      value.startsAt !== undefined || value.endsAt !== undefined;
+    const hasLocalDays =
+      value.startDate !== undefined || value.endDate !== undefined;
+
+    if (hasAbsoluteRange && hasLocalDays) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Usa startsAt/endsAt o startDate/endDate, no ambos",
+        path: ["startDate"],
+      });
+      return;
+    }
+
+    if (hasAbsoluteRange) {
+      if (!value.startsAt || !value.endsAt) {
+        ctx.addIssue({
+          code: "custom",
+          message: "Indica inicio y fin del bloqueo",
+          path: ["endsAt"],
+        });
+      }
+      return;
+    }
+
+    if (!value.startDate || !value.endDate) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Indica el dia y la fecha de fin del bloqueo",
+        path: ["startDate"],
+      });
+      return;
+    }
+
+    if (!value.startAllDay && !value.startTime) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Indica la hora de inicio o marca todo el dia",
+        path: ["startTime"],
+      });
+    }
+
+    if (!value.endAllDay && !value.endTime) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Indica la hora de fin o marca todo el dia",
+        path: ["endTime"],
+      });
+    }
+  });
 
 export const blockParams = z.object({
   id: z.uuid(),

@@ -9,6 +9,8 @@ import { practitioners } from "../../db/schema/practitioners.js";
 import { scheduleBlocks } from "../../db/schema/schedule-blocks.js";
 import { services } from "../../db/schema/services.js";
 import { findPractitionerServiceTx } from "../services/practitioner-service.js";
+import { resolveServiceTiming } from "../services/timing.js";
+import { resolveBlockRange } from "./blocks.js";
 import { withTenant } from "../../db/tenant.js";
 import { AppError } from "../../lib/errors.js";
 import { pgErrorCode } from "../../lib/pg-error.js";
@@ -38,6 +40,8 @@ export type ComputeSlotsParams = {
   bufferBeforeMinutes?: number;
   bufferAfterMinutes?: number;
   slotMinutes?: number;
+  occupancyStep?: boolean;
+  anchorStart?: Date;
 };
 
 /**
@@ -152,6 +156,8 @@ export async function computeSlots(
     bufferBeforeMinutes: params.bufferBeforeMinutes,
     bufferAfterMinutes: params.bufferAfterMinutes,
     slotMinutes: params.slotMinutes,
+    occupancyStep: params.occupancyStep,
+    anchorStart: params.anchorStart,
     busy,
   });
 }
@@ -185,7 +191,11 @@ export async function getAvailability(
 
   return withTenant(db, input.clinicId, async (tx) => {
     const [practitioner] = await tx
-      .select({ id: practitioners.id })
+      .select({
+        id: practitioners.id,
+        bufferBeforeMinutes: practitioners.bufferBeforeMinutes,
+        bufferAfterMinutes: practitioners.bufferAfterMinutes,
+      })
       .from(practitioners)
       .where(
         and(
@@ -252,9 +262,14 @@ export async function getAvailability(
         );
       }
 
-      durationMinutes = override?.durationMinutes ?? service.durationMinutes;
-      bufferBeforeMinutes = service.bufferBeforeMinutes;
-      bufferAfterMinutes = service.bufferAfterMinutes;
+      const timing = resolveServiceTiming({
+        service,
+        override,
+        practitioner,
+      });
+      durationMinutes = timing.durationMinutes;
+      bufferBeforeMinutes = timing.bufferBeforeMinutes;
+      bufferAfterMinutes = timing.bufferAfterMinutes;
 
       const priceCents = override?.priceCents ?? service.priceCents;
       const currency = override?.currency ?? service.currency;
@@ -282,6 +297,7 @@ export async function getAvailability(
       bufferBeforeMinutes,
       bufferAfterMinutes,
       slotMinutes: input.slotMinutes,
+      occupancyStep: Boolean(input.serviceId),
     });
 
     return {
@@ -627,8 +643,14 @@ export async function deleteAvailabilityRule(
 export type CreateBlockInput = {
   clinicId: string;
   practitionerId: string;
-  startsAt: Date;
-  endsAt: Date;
+  startsAt?: Date;
+  endsAt?: Date;
+  startDate?: string;
+  endDate?: string;
+  startAllDay?: boolean;
+  endAllDay?: boolean;
+  startTime?: string;
+  endTime?: string;
   type: string;
   reason?: string;
 };
@@ -637,15 +659,19 @@ export async function createScheduleBlock(
   db: Database,
   input: CreateBlockInput,
 ): Promise<ScheduleBlockRow> {
-  if (input.endsAt.getTime() <= input.startsAt.getTime()) {
-    throw new AppError(
-      422,
-      "INVALID_RANGE",
-      "endsAt debe ser posterior a startsAt",
-    );
-  }
-
   return withTenant(db, input.clinicId, async (tx) => {
+    const [clinic] = await tx
+      .select({ timezone: clinics.timezone })
+      .from(clinics)
+      .where(eq(clinics.id, input.clinicId))
+      .limit(1);
+
+    if (!clinic) {
+      throw new AppError(404, "CLINIC_NOT_FOUND", "Clinica no encontrada");
+    }
+
+    const { startsAt, endsAt } = resolveBlockRange(input, clinic.timezone);
+
     await assertPractitioner(tx, input.practitionerId);
 
     const [block] = await tx
@@ -653,8 +679,8 @@ export async function createScheduleBlock(
       .values({
         clinicId: input.clinicId,
         practitionerId: input.practitionerId,
-        startsAt: input.startsAt,
-        endsAt: input.endsAt,
+        startsAt,
+        endsAt,
         type: input.type,
         reason: input.reason ?? null,
       })

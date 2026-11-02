@@ -148,6 +148,20 @@
       "when": 1793379168714,
       "tag": "0020_payments_and_public_slugs",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1793642269790,
+      "tag": "0021_fearless_ser_duncan",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1793646179255,
+      "tag": "0022_broken_zombie",
+      "breakpoints": true
     }
   ]
 }

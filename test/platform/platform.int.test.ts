@@ -22,6 +22,36 @@ function headers(token: string): Record<string, string> {
   return { authorization: `Bearer ${token}` };
 }
 
+function multipartPayload(
+  fields: Record<string, string>,
+  file?: { name: string; type: string; data: Buffer },
+): { boundary: string; payload: Buffer } {
+  const boundary = `----crmtest${Date.now()}`;
+  const chunks: Buffer[] = [];
+
+  for (const [key, value] of Object.entries(fields)) {
+    chunks.push(
+      Buffer.from(
+        `--${boundary}\r\nContent-Disposition: form-data; name="${key}"\r\n\r\n${value}\r\n`,
+      ),
+    );
+  }
+
+  if (file) {
+    chunks.push(
+      Buffer.from(
+        `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${file.name}"\r\nContent-Type: ${file.type}\r\n\r\n`,
+      ),
+    );
+    chunks.push(file.data);
+    chunks.push(Buffer.from("\r\n"));
+  }
+
+  chunks.push(Buffer.from(`--${boundary}--\r\n`));
+
+  return { boundary, payload: Buffer.concat(chunks) };
+}
+
 beforeAll(async () => {
   testDb = await startTestDatabase();
   appDb = testDb.appDb;
@@ -137,6 +167,132 @@ describe("plataforma SaaS", () => {
     });
     expect(login.statusCode).toBe(200);
     expect(login.json().user.scope).toBe("tenant");
+  });
+
+  it("guarda y actualiza las coordenadas del tenant", async () => {
+    const updated = await app.inject({
+      method: "PATCH",
+      url: `/api/v1/platform/clinics/${clinicId}`,
+      headers: headers(platformToken),
+      payload: { latitude: 25.6866, longitude: -100.3161 },
+    });
+
+    expect(updated.statusCode).toBe(200);
+    expect(updated.json()).toMatchObject({
+      latitude: 25.6866,
+      longitude: -100.3161,
+    });
+
+    const invalidPair = await app.inject({
+      method: "PATCH",
+      url: `/api/v1/platform/clinics/${clinicId}`,
+      headers: headers(platformToken),
+      payload: { latitude: 25.6866 },
+    });
+    expect(invalidPair.statusCode).toBe(400);
+
+    const outOfRange = await app.inject({
+      method: "PATCH",
+      url: `/api/v1/platform/clinics/${clinicId}`,
+      headers: headers(platformToken),
+      payload: { latitude: 120, longitude: -100.3161 },
+    });
+    expect(outOfRange.statusCode).toBe(400);
+  });
+
+  it("sube, lista, descarga y elimina contratos del tenant", async () => {
+    const pdf = Buffer.from("%PDF-1.4\nLicencia de prueba\n%%EOF");
+    const upload = multipartPayload(
+      {
+        name: "Licencia anual 2026",
+        startsAt: "2026-01-01",
+        endsAt: "2026-12-31",
+        notes: "Contrato de prueba",
+      },
+      { name: "licencia.pdf", type: "application/pdf", data: pdf },
+    );
+
+    const created = await app.inject({
+      method: "POST",
+      url: `/api/v1/platform/clinics/${clinicId}/contracts`,
+      headers: {
+        ...headers(platformToken),
+        "content-type": `multipart/form-data; boundary=${upload.boundary}`,
+      },
+      payload: upload.payload,
+    });
+
+    expect(created.statusCode).toBe(201);
+    const contract = created.json() as {
+      id: string;
+      name: string;
+      fileName: string;
+      sizeBytes: number;
+    };
+    expect(contract.name).toBe("Licencia anual 2026");
+    expect(contract.fileName).toBe("licencia.pdf");
+    expect(contract.sizeBytes).toBe(pdf.length);
+
+    const list = await app.inject({
+      method: "GET",
+      url: `/api/v1/platform/clinics/${clinicId}/contracts`,
+      headers: headers(platformToken),
+    });
+    expect(list.statusCode).toBe(200);
+    expect(
+      (list.json() as Array<{ id: string }>).some(
+        (item) => item.id === contract.id,
+      ),
+    ).toBe(true);
+
+    const file = await app.inject({
+      method: "GET",
+      url: `/api/v1/platform/clinics/${clinicId}/contracts/${contract.id}/file`,
+      headers: headers(platformToken),
+    });
+    expect(file.statusCode).toBe(200);
+    expect(file.headers["content-type"]).toContain("application/pdf");
+    expect(file.rawPayload.toString("utf8")).toContain("%PDF");
+
+    const deleted = await app.inject({
+      method: "DELETE",
+      url: `/api/v1/platform/clinics/${clinicId}/contracts/${contract.id}`,
+      headers: headers(platformToken),
+    });
+    expect(deleted.statusCode).toBe(204);
+  });
+
+  it("rechaza archivos no permitidos y uploads sin archivo", async () => {
+    const text = multipartPayload(
+      { name: "Contrato invalido", startsAt: "2026-01-01" },
+      { name: "nota.txt", type: "text/plain", data: Buffer.from("hola") },
+    );
+
+    const invalid = await app.inject({
+      method: "POST",
+      url: `/api/v1/platform/clinics/${clinicId}/contracts`,
+      headers: {
+        ...headers(platformToken),
+        "content-type": `multipart/form-data; boundary=${text.boundary}`,
+      },
+      payload: text.payload,
+    });
+    expect(invalid.statusCode).toBe(422);
+
+    const noFile = multipartPayload({
+      name: "Sin archivo",
+      startsAt: "2026-01-01",
+    });
+    const missing = await app.inject({
+      method: "POST",
+      url: `/api/v1/platform/clinics/${clinicId}/contracts`,
+      headers: {
+        ...headers(platformToken),
+        "content-type": `multipart/form-data; boundary=${noFile.boundary}`,
+      },
+      payload: noFile.payload,
+    });
+    expect(missing.statusCode).toBe(400);
   });
 
   it("crea usuarios del tenant y protege al último admin", async () => {

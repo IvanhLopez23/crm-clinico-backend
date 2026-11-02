@@ -287,7 +287,25 @@ curl -X POST http://localhost:3000/api/v1/platform/clinics/<id>/users \
     "fullName":"Recepcion","email":"recepcion@valle.com",
     "password":"PasswordSegura123","role":"receptionist"
   }'
+
+# contratos / licencias (multipart, max 10 MB)
+curl -X POST http://localhost:3000/api/v1/platform/clinics/<id>/contracts \
+  -H "authorization: Bearer <platform>" \
+  -F "name=Licencia anual 2026" -F "startsAt=2026-01-01" -F "endsAt=2026-12-31" \
+  -F "file=@contrato.pdf;type=application/pdf"
+
+# listar, descargar y eliminar
+curl http://localhost:3000/api/v1/platform/clinics/<id>/contracts \
+  -H "authorization: Bearer <platform>"
+curl -OJ http://localhost:3000/api/v1/platform/clinics/<id>/contracts/<contractId>/file \
+  -H "authorization: Bearer <platform>"
+curl -X DELETE http://localhost:3000/api/v1/platform/clinics/<id>/contracts/<contractId> \
+  -H "authorization: Bearer <platform>"
 ```
+
+Los archivos de contratos se guardan en `uploads/contracts` (configurable con
+`CONTRACTS_DIR`), fuera de la base de datos. En produccion ese directorio debe
+ser un volumen persistente con permisos de escritura.
 
 Los tokens de plataforma no pueden entrar a rutas de tenant y viceversa. Un
 tenant suspendido bloquea login y tokens existentes. Las metricas se calculan
@@ -452,6 +470,29 @@ curl -X POST http://localhost:3000/api/v1/availability/blocks \
     "endsAt": "2027-03-01T11:00:00-06:00",
     "type": "meeting",
     "reason": "Reunion clinica"
+  }'
+
+# bloqueo de dia completo (se calcula en la zona de la clinica)
+curl -X POST http://localhost:3000/api/v1/availability/blocks \
+  -H "content-type: application/json" -H "authorization: Bearer <token>" -d '{
+    "practitionerId": "<uuid>",
+    "startDate": "2027-03-01",
+    "endDate": "2027-03-01",
+    "startAllDay": true,
+    "endAllDay": true,
+    "type": "vacation"
+  }'
+
+# varios dias completos y rango parcial
+curl -X POST http://localhost:3000/api/v1/availability/blocks \
+  -H "content-type: application/json" -H "authorization: Bearer <token>" -d '{
+    "practitionerId": "<uuid>",
+    "startDate": "2027-03-01",
+    "endDate": "2027-03-03",
+    "startAllDay": true,
+    "endAllDay": false,
+    "endTime": "12:00",
+    "type": "personal"
   }'
 
 # slots libres (publico: tenant por header)

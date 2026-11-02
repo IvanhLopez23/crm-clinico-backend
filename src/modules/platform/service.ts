@@ -9,12 +9,17 @@ import { patients } from "../../db/schema/patients.js";
 import { platformAdmins } from "../../db/schema/platform-admins.js";
 import { practitioners } from "../../db/schema/practitioners.js";
 import { services } from "../../db/schema/services.js";
+import { tenantContracts } from "../../db/schema/tenant-contracts.js";
 import { users, type UserRole } from "../../db/schema/users.js";
 import { withTenant } from "../../db/tenant.js";
 import { recordAudit } from "../../lib/audit.js";
 import { AppError } from "../../lib/errors.js";
 import { hashPassword } from "../../lib/password.js";
 import { pgErrorCode } from "../../lib/pg-error.js";
+import {
+  summarizeContracts,
+  type ContractStatus,
+} from "./contract-status.js";
 import type {
   CreateClinicBody,
   CreateClinicUserBody,
@@ -28,12 +33,18 @@ export type TenantSummary = {
   slug: string;
   timezone: string;
   currency: string;
+  latitude: number | null;
+  longitude: number | null;
   isActive: boolean;
   createdAt: Date;
   usersCount: number;
   practitionersCount: number;
   patientsCount: number;
   appointmentsCount: number;
+  contractCount: number;
+  contractEndsAt: string | null;
+  contractStatus: ContractStatus;
+  contractDaysLeft: number | null;
 };
 
 export type TenantUser = {
@@ -168,6 +179,8 @@ export async function createTenant(
         slug,
         timezone: input.timezone,
         currency: input.currency,
+        latitude: input.latitude ?? null,
+        longitude: input.longitude ?? null,
       });
 
       await tx.insert(clinicSlugs).values({ slug, clinicId });
@@ -209,7 +222,12 @@ export async function createTenant(
     action: "platform.tenant_create",
     resourceType: "clinic",
     resourceId: clinicId,
-    after: { name: input.name, timezone: input.timezone },
+    after: {
+      name: input.name,
+      timezone: input.timezone,
+      latitude: input.latitude ?? null,
+      longitude: input.longitude ?? null,
+    },
   });
 
   return getTenant(db, clinicId);
@@ -240,6 +258,8 @@ export async function updateTenant(
         ...(input.name !== undefined ? { name: input.name } : {}),
         ...(input.timezone !== undefined ? { timezone: input.timezone } : {}),
         ...(input.currency !== undefined ? { currency: input.currency } : {}),
+        ...(input.latitude !== undefined ? { latitude: input.latitude } : {}),
+        ...(input.longitude !== undefined ? { longitude: input.longitude } : {}),
         ...(input.isActive !== undefined ? { isActive: input.isActive } : {}),
       })
       .where(eq(clinics.id, clinicId));
@@ -472,18 +492,34 @@ async function tenantStats(
             .from(users)
             .where(eq(users.clinicId, clinicId));
 
+    const contractRows = await tx
+      .select({
+        endsAt: tenantContracts.endsAt,
+        isActive: tenantContracts.isActive,
+      })
+      .from(tenantContracts);
+
+    const today =
+      DateTime.now().setZone(clinic.timezone).toISODate() ??
+      DateTime.now().toISODate() ??
+      "";
+    const contractSummary = summarizeContracts(contractRows, today);
+
     return {
       id: clinic.id,
       name: clinic.name,
       slug: clinic.slug ?? "",
       timezone: clinic.timezone,
       currency: clinic.currency,
+      latitude: clinic.latitude ?? null,
+      longitude: clinic.longitude ?? null,
       isActive: clinic.isActive,
       createdAt: clinic.createdAt,
       usersCount: Number(userCount?.total ?? 0),
       practitionersCount: Number(practitionerCount?.total ?? 0),
       patientsCount: Number(patientCount?.total ?? 0),
       appointmentsCount: Number(appointmentCount?.total ?? 0),
+      ...contractSummary,
     };
   });
 }

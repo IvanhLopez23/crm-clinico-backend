@@ -17,6 +17,7 @@ import { pgConstraint, pgErrorCode } from "../../lib/pg-error.js";
 import { computeSlots } from "../availability/service.js";
 import { createReminderJobsTx } from "../reminders/service.js";
 import { findPractitionerServiceTx } from "../services/practitioner-service.js";
+import { resolveServiceTiming } from "../services/timing.js";
 
 export type Appointment = typeof appointments.$inferSelect;
 export type BookedVia = (typeof BOOKED_VIA_VALUES)[number];
@@ -135,7 +136,11 @@ export async function createAppointmentTx(
   }
 
   const [practitioner] = await tx
-    .select({ id: practitioners.id })
+    .select({
+      id: practitioners.id,
+      bufferBeforeMinutes: practitioners.bufferBeforeMinutes,
+      bufferAfterMinutes: practitioners.bufferAfterMinutes,
+    })
     .from(practitioners)
     .where(
       and(
@@ -205,9 +210,14 @@ export async function createAppointmentTx(
     }
 
     service = selected;
-    durationMinutes = override?.durationMinutes ?? selected.durationMinutes;
-    bufferBeforeMinutes = selected.bufferBeforeMinutes;
-    bufferAfterMinutes = selected.bufferAfterMinutes;
+    const timing = resolveServiceTiming({
+      service: selected,
+      override,
+      practitioner,
+    });
+    durationMinutes = timing.durationMinutes;
+    bufferBeforeMinutes = timing.bufferBeforeMinutes;
+    bufferAfterMinutes = timing.bufferAfterMinutes;
     priceCentsSnapshot = override?.priceCents ?? selected.priceCents;
     currencySnapshot = override?.currency ?? selected.currency;
     endsAt = new Date(input.startsAt.getTime() + durationMinutes * 60_000);
@@ -399,6 +409,7 @@ async function assertSlotAvailable(
     durationMinutes: params.durationMinutes,
     bufferBeforeMinutes: params.bufferBeforeMinutes,
     bufferAfterMinutes: params.bufferAfterMinutes,
+    occupancyStep: Boolean(appointment.serviceId),
   });
 
   const available = slots.some(

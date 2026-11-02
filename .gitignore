@@ -24,6 +24,9 @@ yarn-error.log*
 # Datos locales de Docker
 docker/data/
 
+# Archivos subidos (contratos, etc.)
+uploads/
+
 # Sistema y editores
 .DS_Store
 Thumbs.db

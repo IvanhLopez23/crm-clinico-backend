@@ -60,6 +60,8 @@ try {
       id: clinicId,
       name: "Clinica Aurora",
       timezone: TZ,
+      latitude: 19.4326,
+      longitude: -99.1332,
     });
 
     await tx.insert(schema.practitioners).values([

@@ -21,6 +21,7 @@ export * from "./schedule-blocks.js";
 export * from "./services.js";
 export * from "./specialties.js";
 export * from "./tags.js";
+export * from "./tenant-contracts.js";
 export * from "./users.js";
 export * from "./waitlist-entries.js";
 export * from "./waitlist-offers.js";

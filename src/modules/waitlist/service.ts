@@ -284,6 +284,7 @@ export async function offerNextForSlotTx(
     from,
     to,
     durationMinutes,
+    anchorStart: input.startsAt,
   });
 
   if (

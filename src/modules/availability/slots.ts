@@ -30,6 +30,18 @@ export type GenerateSlotsInput = {
   bufferAfterMinutes?: number;
   /** Override de granularidad; si falta se usa la de cada regla. */
   slotMinutes?: number;
+  /**
+   * Inicio concreto que debe evaluarse ademas de la malla. Lo usa la lista
+   * de espera para revalidar el hueco liberado aunque no caiga en un multiplo
+   * de `slotMinutes`.
+   */
+  anchorStart?: Date;
+  /**
+   * Si es true, el paso nunca es menor que el bloque ocupado
+   * (duracion + buffers). Evita ofrecer inicios que se solapan entre si
+   * cuando el servicio dura mas que la granularidad de la regla.
+   */
+  occupancyStep?: boolean;
   busy?: BusyInterval[];
   now?: Date;
 };
@@ -69,17 +81,48 @@ export function generateSlots(input: GenerateSlotsInput): Slot[] {
       if (isoDate < rule.validFrom) continue;
       if (rule.validTo && isoDate > rule.validTo) continue;
 
-      const step = input.slotMinutes ?? rule.slotMinutes;
       const durationMinutes = input.durationMinutes ?? rule.slotMinutes;
+      const bufferBefore = input.bufferBeforeMinutes ?? 0;
+      const bufferAfter = input.bufferAfterMinutes ?? 0;
+      const baseStep = input.slotMinutes ?? rule.slotMinutes;
+      const step = input.occupancyStep
+        ? durationMinutes + bufferBefore + bufferAfter
+        : baseStep;
       const start = day.set(parseTime(rule.startTime));
       const limit = day.set(parseTime(rule.endTime));
       const duration = { minutes: durationMinutes };
-      const bufferBefore = input.bufferBeforeMinutes ?? 0;
-      const bufferAfter = input.bufferAfterMinutes ?? 0;
 
       // El buffer previo tambien debe caber dentro de la regla.
       let cursor = start.plus({ minutes: bufferBefore });
       let guard = 0;
+
+      if (input.anchorStart) {
+        const anchor = DateTime.fromJSDate(input.anchorStart, { zone });
+        if (
+          anchor.isValid &&
+          anchor.hasSame(day, "day") &&
+          anchor >= cursor &&
+          anchor.plus({ minutes: durationMinutes + bufferAfter }) <= limit
+        ) {
+          const occupiedStart = anchor
+            .minus({ minutes: bufferBefore })
+            .toJSDate();
+          const occupiedEnd = anchor
+            .plus({ minutes: durationMinutes + bufferAfter })
+            .toJSDate();
+          const startsAt = anchor.toUTC().toJSDate();
+
+          if (
+            startsAt.getTime() > nowMs &&
+            !overlappingEnd(occupiedStart, occupiedEnd, busy)
+          ) {
+            slots.set(startsAt.getTime(), {
+              startsAt,
+              endsAt: anchor.plus(duration).toUTC().toJSDate(),
+            });
+          }
+        }
+      }
 
       while (cursor.plus({ minutes: durationMinutes + bufferAfter }) <= limit) {
         // Cota de seguridad: nunca iterar sin fin sobre una regla corrupta.
@@ -89,15 +132,28 @@ export function generateSlots(input: GenerateSlotsInput): Slot[] {
         const occupiedEnd = cursor
           .plus({ minutes: durationMinutes + bufferAfter })
           .toJSDate();
+
+        // Si el candidato choca con una cita/bloqueo, saltamos al primer
+        // inicio que deja libre el bloque ocupado completo. Sin esto, un
+        // servicio de 20 min con 5+5 de buffers solo encontraria el siguiente
+        // hueco 40 min despues (el candidato intermedio queda tapado por el
+        // buffer y el siguiente multiplo de slot_minutes ya es 40).
+        const conflictEnd = overlappingEnd(occupiedStart, occupiedEnd, busy);
+        if (conflictEnd) {
+          const next = DateTime.fromJSDate(conflictEnd, { zone }).plus({
+            minutes: bufferBefore,
+          });
+          cursor =
+            next.isValid && next > cursor
+              ? (next as typeof cursor)
+              : cursor.plus({ minutes: step });
+          continue;
+        }
+
         const startsAt = cursor.toUTC().toJSDate();
         const endsAt = cursor.plus(duration).toUTC().toJSDate();
 
-        if (
-          startsAt.getTime() > nowMs &&
-          !busy.some((interval) =>
-            overlaps(occupiedStart, occupiedEnd, interval),
-          )
-        ) {
+        if (startsAt.getTime() > nowMs) {
           slots.set(startsAt.getTime(), { startsAt, endsAt });
         }
 
@@ -120,6 +176,21 @@ function overlaps(
     startsAt.getTime() < interval.endsAt.getTime() &&
     endsAt.getTime() > interval.startsAt.getTime()
   );
+}
+
+function overlappingEnd(
+  startsAt: Date,
+  endsAt: Date,
+  busy: BusyInterval[],
+): Date | null {
+  let latest: Date | null = null;
+  for (const interval of busy) {
+    if (!overlaps(startsAt, endsAt, interval)) continue;
+    if (!latest || interval.endsAt.getTime() > latest.getTime()) {
+      latest = interval.endsAt;
+    }
+  }
+  return latest;
 }
 
 function parseTime(value: string): {

@@ -171,7 +171,7 @@ describe("servicios por especialista", () => {
     expect(response.statusCode).toBe(200);
     const body = response.json();
     expect(body.service.priceCents).toBe(150_000);
-    expect(body.slots).toHaveLength(10);
+    expect(body.slots).toHaveLength(3);
 
     const first = body.slots[0];
     const minutes =
@@ -200,6 +200,8 @@ describe("servicios por especialista", () => {
     expect(response.json()).toMatchObject({
       serviceId,
       durationMinutesSnapshot: 45,
+      bufferBeforeMinutesSnapshot: 0,
+      bufferAfterMinutesSnapshot: 5,
       priceCentsSnapshot: 150_000,
       currencySnapshot: "MXN",
     });

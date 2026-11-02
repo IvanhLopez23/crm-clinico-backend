@@ -47,8 +47,7 @@ describe("generateSlots", () => {
     ]);
   });
 
-  it("descarta slots que solapan un intervalo ocupado", () => {
-    const slots = generateSlots({
+  it("descarta slots que solapan un intervalo ocupado", () => {    const slots = generateSlots({
       rules: [mondayRule],
       from: "2027-03-01",
       to: "2027-03-02",
@@ -68,6 +67,72 @@ describe("generateSlots", () => {
     expect(slots.some((s) => s.startsAt.toISOString() === "2027-03-01T15:15:00.000Z")).toBe(false);
     // 09:30 ya no solapa con 09:00-09:30.
     expect(slots.some((s) => s.startsAt.toISOString() === "2027-03-01T15:30:00.000Z")).toBe(true);
+  });
+
+  it("con occupancyStep el paso respeta duracion + buffers", () => {
+    const slots = generateSlots({
+      rules: [{ ...mondayRule, slotMinutes: 20 }],
+      from: "2027-03-01",
+      to: "2027-03-02",
+      timezone: "America/Mexico_City",
+      durationMinutes: 20,
+      bufferBeforeMinutes: 5,
+      bufferAfterMinutes: 5,
+      occupancyStep: true,
+      now: NOW,
+    });
+
+    expect(slots[0]?.startsAt.toISOString()).toBe("2027-03-01T15:05:00.000Z");
+    expect(slots[1]?.startsAt.toISOString()).toBe("2027-03-01T15:35:00.000Z");
+    expect(slots[2]?.startsAt.toISOString()).toBe("2027-03-01T16:05:00.000Z");
+  });
+
+  it("incluye un inicio ancla aunque no caiga en la malla", () => {
+    const slots = generateSlots({
+      rules: [{ ...mondayRule, slotMinutes: 30 }],
+      from: "2027-03-01",
+      to: "2027-03-02",
+      timezone: "America/Mexico_City",
+      durationMinutes: 20,
+      bufferBeforeMinutes: 5,
+      bufferAfterMinutes: 5,
+      occupancyStep: true,
+      anchorStart: new Date("2027-03-01T15:10:00.000Z"),
+      now: NOW,
+    });
+
+    // La malla con occupancyStep empieza 09:05 y sigue 09:35; el ancla
+    // 09:10 tambien debe estar disponible.
+    expect(
+      slots.some(
+        (slot) => slot.startsAt.toISOString() === "2027-03-01T15:10:00.000Z",
+      ),
+    ).toBe(true);
+  });
+
+  it("tras una cita con buffers salta al primer inicio valido", () => {
+    const slots = generateSlots({
+      rules: [{ ...mondayRule, slotMinutes: 20 }],
+      from: "2027-03-01",
+      to: "2027-03-02",
+      timezone: "America/Mexico_City",
+      durationMinutes: 20,
+      bufferBeforeMinutes: 5,
+      bufferAfterMinutes: 5,
+      now: NOW,
+      busy: [
+        {
+          // Cita de 09:00-09:20 con 5 min antes y 5 despues.
+          startsAt: new Date("2027-03-01T15:00:00.000Z"),
+          endsAt: new Date("2027-03-01T15:30:00.000Z"),
+        },
+      ],
+    });
+
+    // Sin el salto, el siguiente multiplo de 20 min seria 09:45 (15:45Z).
+    // Con el salto, el primer inicio valido es 09:35 (15:35Z).
+    expect(slots[0]?.startsAt.toISOString()).toBe("2027-03-01T15:35:00.000Z");
+    expect(slots[0]?.endsAt.toISOString()).toBe("2027-03-01T15:55:00.000Z");
   });
 
   it("no ofrece slots en el pasado", () => {
