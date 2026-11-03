@@ -13,6 +13,7 @@ import { clinicRoutes } from "./modules/clinic/routes.js";
 import { patientRoutes } from "./modules/patients/routes.js";
 import { paymentRoutes } from "./modules/payments/routes.js";
 import { platformRoutes } from "./modules/platform/routes.js";
+import { notificationRoutes } from "./modules/notifications/routes.js";
 import { publicRoutes } from "./modules/public/routes.js";
 import { realtimeRoutes } from "./modules/realtime/routes.js";
 import { reminderRoutes } from "./modules/reminders/routes.js";
@@ -116,6 +117,7 @@ export function buildApp({ db, logger = true }: BuildAppOptions): FastifyInstanc
   app.register(waitlistRoutes, { prefix: "/api/v1", db });
   app.register(clinicRoutes, { prefix: "/api/v1", db });
   app.register(patientRoutes, { prefix: "/api/v1", db });
+  app.register(notificationRoutes, { prefix: "/api/v1", db });
   app.register(paymentRoutes, { prefix: "/api/v1", db });
   app.register(platformRoutes, { prefix: "/api/v1", db });
   app.register(publicRoutes, { prefix: "/api/v1", db });

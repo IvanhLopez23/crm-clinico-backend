@@ -59,6 +59,8 @@ beforeAll(async () => {
     clinicId,
     fullName: "Dra. Transicion",
     specialty: "Medicina general",
+    bufferBeforeMinutes: 0,
+    bufferAfterMinutes: 10,
   });
 
   await testDb.adminDb.insert(schema.patients).values({

@@ -168,8 +168,9 @@ export async function createTenant(
 ): Promise<TenantDetail> {
   assertTimezone(input.timezone);
   await assertPlatformEmailFree(db, input.admin.email);
+  if (input.slug) await assertSlugFree(db, input.slug);
   const clinicId = randomUUID();
-  const slug = buildSlug(input.name, clinicId);
+  const slug = input.slug ?? buildSlug(input.name, clinicId);
 
   try {
     await withTenant(db, clinicId, async (tx) => {
@@ -207,6 +208,14 @@ export async function createTenant(
     });
   } catch (error) {
     if (pgErrorCode(error) === "23505") {
+      const constraint = uniqueConstraint(error);
+      if (constraint?.includes("clinic_slugs")) {
+        throw new AppError(
+          409,
+          "SLUG_TAKEN",
+          "Esa URL ya esta en uso por otra clinica",
+        );
+      }
       throw new AppError(
         409,
         "EMAIL_EXISTS",
@@ -224,6 +233,7 @@ export async function createTenant(
     resourceId: clinicId,
     after: {
       name: input.name,
+      slug,
       timezone: input.timezone,
       latitude: input.latitude ?? null,
       longitude: input.longitude ?? null,
@@ -240,30 +250,70 @@ export async function updateTenant(
   platformAdminId: string,
 ): Promise<TenantDetail> {
   if (input.timezone) assertTimezone(input.timezone);
+  if (input.slug) await assertSlugFree(db, input.slug, clinicId);
 
-  await withTenant(db, clinicId, async (tx) => {
-    const [existing] = await tx
-      .select({ id: clinics.id })
-      .from(clinics)
-      .where(eq(clinics.id, clinicId))
-      .limit(1);
+  try {
+    await withTenant(db, clinicId, async (tx) => {
+      const [existing] = await tx
+        .select({ id: clinics.id, slug: clinics.slug })
+        .from(clinics)
+        .where(eq(clinics.id, clinicId))
+        .limit(1);
 
-    if (!existing) {
-      throw new AppError(404, "CLINIC_NOT_FOUND", "Clinica no encontrada");
+      if (!existing) {
+        throw new AppError(404, "CLINIC_NOT_FOUND", "Clinica no encontrada");
+      }
+
+      await tx
+        .update(clinics)
+        .set({
+          ...(input.name !== undefined ? { name: input.name } : {}),
+          ...(input.slug !== undefined ? { slug: input.slug } : {}),
+          ...(input.timezone !== undefined ? { timezone: input.timezone } : {}),
+          ...(input.currency !== undefined ? { currency: input.currency } : {}),
+          ...(input.latitude !== undefined ? { latitude: input.latitude } : {}),
+          ...(input.longitude !== undefined
+            ? { longitude: input.longitude }
+            : {}),
+          ...(input.isActive !== undefined ? { isActive: input.isActive } : {}),
+        })
+        .where(eq(clinics.id, clinicId));
+
+      // El portal publico resuelve por `clinic_slugs`; hay que mover el
+      // mapeo junto con `clinics.slug` para que la URL nueva funcione de
+      // inmediato y la anterior deje de apuntar a esta clinica.
+      if (input.slug !== undefined) {
+        const [mapping] = await tx
+          .select({ slug: clinicSlugs.slug })
+          .from(clinicSlugs)
+          .where(eq(clinicSlugs.clinicId, clinicId))
+          .limit(1);
+
+        if (mapping) {
+          if (mapping.slug !== input.slug) {
+            await tx
+              .update(clinicSlugs)
+              .set({ slug: input.slug })
+              .where(eq(clinicSlugs.clinicId, clinicId));
+          }
+        } else {
+          await tx.insert(clinicSlugs).values({ slug: input.slug, clinicId });
+        }
+      }
+    });
+  } catch (error) {
+    if (pgErrorCode(error) === "23505") {
+      const constraint = uniqueConstraint(error);
+      if (constraint?.includes("clinic_slugs")) {
+        throw new AppError(
+          409,
+          "SLUG_TAKEN",
+          "Esa URL ya esta en uso por otra clinica",
+        );
+      }
     }
-
-    await tx
-      .update(clinics)
-      .set({
-        ...(input.name !== undefined ? { name: input.name } : {}),
-        ...(input.timezone !== undefined ? { timezone: input.timezone } : {}),
-        ...(input.currency !== undefined ? { currency: input.currency } : {}),
-        ...(input.latitude !== undefined ? { latitude: input.latitude } : {}),
-        ...(input.longitude !== undefined ? { longitude: input.longitude } : {}),
-        ...(input.isActive !== undefined ? { isActive: input.isActive } : {}),
-      })
-      .where(eq(clinics.id, clinicId));
-  });
+    throw error;
+  }
 
   await safeAudit(db, {
     clinicId,
@@ -539,6 +589,32 @@ async function assertPlatformEmailFree(
       409,
       "EMAIL_EXISTS",
       "Ese correo pertenece a un administrador de plataforma",
+    );
+  }
+}
+
+function uniqueConstraint(error: unknown): string | undefined {
+  if (!error || typeof error !== "object") return undefined;
+  const constraint = (error as { constraint?: unknown }).constraint;
+  return typeof constraint === "string" ? constraint : undefined;
+}
+
+async function assertSlugFree(
+  db: Database,
+  slug: string,
+  ignoreClinicId?: string,
+): Promise<void> {
+  const [row] = await db
+    .select({ clinicId: clinicSlugs.clinicId })
+    .from(clinicSlugs)
+    .where(eq(clinicSlugs.slug, slug))
+    .limit(1);
+
+  if (row && row.clinicId !== ignoreClinicId) {
+    throw new AppError(
+      409,
+      "SLUG_TAKEN",
+      "Esa URL ya esta en uso por otra clinica",
     );
   }
 }

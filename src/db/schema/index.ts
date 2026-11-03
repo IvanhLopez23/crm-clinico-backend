@@ -9,6 +9,7 @@ export * from "./clinics.js";
 export * from "./contact-points.js";
 export * from "./households.js";
 export * from "./idempotency-keys.js";
+export * from "./notifications.js";
 export * from "./patient-allergies.js";
 export * from "./patient-guardians.js";
 export * from "./patients.js";

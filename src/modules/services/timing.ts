@@ -14,10 +14,13 @@ export type ServiceTiming = {
  * Resuelve la duracion y los buffers efectivos de una cita.
  *
  * - La duracion del override del especialista gana sobre la del servicio.
- * - Los buffers del servicio mandan cuando son mayores que cero; si el
- *   servicio no define buffer, se hereda el del especialista. Asi el perfil
- *   del especialista sirve como valor por defecto sin pisar un servicio que
- *   ya define su propia preparacion/cierre.
+ * - Los buffers del especialista mandan: son los que el usuario configura en
+ *   su perfil (Preparacion antes / Cierre despues) y los que definen el paso
+ *   real de la agenda. Si no hay especialista, se usan los del servicio.
+ *
+ * Antes el servicio pisaba al especialista cuando tenia un buffer mayor que
+ * cero. Eso hacia que un 0 explicito del perfil se ignorara y que una cita de
+ * 30 min avanzara cada 35 (por ejemplo 10:20 en lugar de 10:30).
  */
 export function resolveServiceTiming(input: {
   service: ServiceTimingSource;
@@ -27,16 +30,16 @@ export function resolveServiceTiming(input: {
     bufferAfterMinutes: number;
   } | null;
 }): ServiceTiming {
+  const practitioner = input.practitioner;
+
   return {
     durationMinutes:
       input.override?.durationMinutes ?? input.service.durationMinutes,
-    bufferBeforeMinutes:
-      input.service.bufferBeforeMinutes ||
-      input.practitioner?.bufferBeforeMinutes ||
-      0,
-    bufferAfterMinutes:
-      input.service.bufferAfterMinutes ||
-      input.practitioner?.bufferAfterMinutes ||
-      0,
+    bufferBeforeMinutes: practitioner
+      ? practitioner.bufferBeforeMinutes
+      : input.service.bufferBeforeMinutes,
+    bufferAfterMinutes: practitioner
+      ? practitioner.bufferAfterMinutes
+      : input.service.bufferAfterMinutes,
   };
 }

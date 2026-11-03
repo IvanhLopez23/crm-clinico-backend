@@ -1,4 +1,8 @@
-export type RealtimeTopic = "agenda" | "sala" | "patients";
+export type RealtimeTopic =
+  | "agenda"
+  | "sala"
+  | "patients"
+  | "notifications";
 
 export type RealtimeEvent = {
   clinicId: string;

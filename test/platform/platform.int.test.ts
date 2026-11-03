@@ -200,6 +200,53 @@ describe("plataforma SaaS", () => {
     expect(outOfRange.statusCode).toBe(400);
   });
 
+  it("permite definir la URL publica y no la cambia al renombrar", async () => {
+    const updated = await app.inject({
+      method: "PATCH",
+      url: `/api/v1/platform/clinics/${clinicId}`,
+      headers: headers(platformToken),
+      payload: { slug: "Clinica Las Puentes" },
+    });
+
+    expect(updated.statusCode).toBe(200);
+    expect(updated.json().slug).toBe("clinica-las-puentes");
+
+    const renamed = await app.inject({
+      method: "PATCH",
+      url: `/api/v1/platform/clinics/${clinicId}`,
+      headers: headers(platformToken),
+      payload: { name: "Clinica Las Puentes Renombrada" },
+    });
+
+    expect(renamed.statusCode).toBe(200);
+    expect(renamed.json().slug).toBe("clinica-las-puentes");
+
+    const publicResponse = await app.inject({
+      method: "GET",
+      url: "/api/v1/public/clinics/clinica-las-puentes",
+    });
+    expect(publicResponse.statusCode).toBe(200);
+    expect(publicResponse.json().clinic.id).toBe(clinicId);
+
+    const duplicate = await app.inject({
+      method: "POST",
+      url: "/api/v1/platform/clinics",
+      headers: headers(platformToken),
+      payload: {
+        name: "Clinica Duplicada",
+        slug: "clinica-las-puentes",
+        admin: {
+          fullName: "Admin Duplicado",
+          email: "duplicado.admin@test.local",
+          password: "DuplicadoPass123",
+        },
+      },
+    });
+
+    expect(duplicate.statusCode).toBe(409);
+    expect(duplicate.json().error.code).toBe("SLUG_TAKEN");
+  });
+
   it("sube, lista, descarga y elimina contratos del tenant", async () => {
     const pdf = Buffer.from("%PDF-1.4\nLicencia de prueba\n%%EOF");
     const upload = multipartPayload(

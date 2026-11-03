@@ -12,7 +12,9 @@ import { AppError } from "../../lib/errors.js";
 import { normalizeEmail, normalizePhone } from "../../lib/phi-crypto.js";
 import { getAvailability } from "../availability/service.js";
 import { bookAppointment } from "../appointments/service.js";
+import { createPublicBookingNotifications } from "../notifications/service.js";
 import { createPatient } from "../patients/service.js";
+import { publishRealtime } from "../realtime/bus.js";
 import type { PublicBookingBody } from "./schema.js";
 
 export type PublicClinic = {
@@ -132,8 +134,31 @@ export async function getPublicClinic(
           currency: practitionerServices.currency,
         })
         .from(practitionerServices)
-        .where(eq(practitionerServices.isActive, true)),
+        .innerJoin(services, eq(services.id, practitionerServices.serviceId))
+        .innerJoin(
+          practitioners,
+          eq(practitioners.id, practitionerServices.practitionerId),
+        )
+        .where(
+          and(
+            eq(practitionerServices.isActive, true),
+            eq(services.isActive, true),
+            eq(practitioners.isActive, true),
+            isNull(practitioners.deletedAt),
+          ),
+        ),
     ]);
+
+    // El catalogo publico solo muestra lo que realmente se puede reservar:
+    // servicios activos con al menos una asignacion activa a un especialista
+    // activo. Un servicio suelto en el catalogo, o una asignacion quitada,
+    // no debe aparecer en el portal.
+    const offeredServiceIds = new Set(
+      assignmentRows.map((item) => item.serviceId),
+    );
+    const offeringPractitionerIds = new Set(
+      assignmentRows.map((item) => item.practitionerId),
+    );
 
     return {
       clinic: {
@@ -143,11 +168,55 @@ export async function getPublicClinic(
         timezone: clinic.timezone,
         currency: clinic.currency,
       },
-      services: serviceRows,
-      practitioners: practitionerRows,
+      services: serviceRows.filter((item) => offeredServiceIds.has(item.id)),
+      practitioners: practitionerRows.filter((item) =>
+        offeringPractitionerIds.has(item.id),
+      ),
       assignments: assignmentRows,
     };
   });
+}
+
+/**
+ * Valida que la combinacion servicio + especialista sea reservable en la
+ * clinica. Se usa en disponibilidad y reserva publicas para que un cliente
+ * no pueda saltarse el catalogo enviando ids arbitrarios.
+ */
+async function assertPublicOffering(
+  db: Database,
+  params: { clinicId: string; practitionerId: string; serviceId: string },
+): Promise<void> {
+  const available = await withTenant(db, params.clinicId, async (tx) => {
+    const [row] = await tx
+      .select({ id: practitionerServices.id })
+      .from(practitionerServices)
+      .innerJoin(services, eq(services.id, practitionerServices.serviceId))
+      .innerJoin(
+        practitioners,
+        eq(practitioners.id, practitionerServices.practitionerId),
+      )
+      .where(
+        and(
+          eq(practitionerServices.practitionerId, params.practitionerId),
+          eq(practitionerServices.serviceId, params.serviceId),
+          eq(practitionerServices.isActive, true),
+          eq(services.isActive, true),
+          eq(practitioners.isActive, true),
+          isNull(practitioners.deletedAt),
+        ),
+      )
+      .limit(1);
+
+    return Boolean(row);
+  });
+
+  if (!available) {
+    throw new AppError(
+      404,
+      "SERVICE_NOT_AVAILABLE",
+      "Ese servicio no esta disponible para el especialista seleccionado",
+    );
+  }
 }
 
 export async function getPublicAvailability(
@@ -160,6 +229,13 @@ export async function getPublicAvailability(
   },
 ) {
   const clinic = await resolveClinicBySlug(db, params.slug);
+
+  await assertPublicOffering(db, {
+    clinicId: clinic.id,
+    practitionerId: params.practitionerId,
+    serviceId: params.serviceId,
+  });
+
   const to = DateTime.fromISO(params.date, { zone: clinic.timezone })
     .plus({ days: 1 })
     .toISODate();
@@ -183,6 +259,13 @@ export async function bookPublicAppointment(
   params: { slug: string; input: PublicBookingBody },
 ) {
   const clinic = await resolveClinicBySlug(db, params.slug);
+
+  await assertPublicOffering(db, {
+    clinicId: clinic.id,
+    practitionerId: params.input.practitionerId,
+    serviceId: params.input.serviceId,
+  });
+
   const phone = normalizePhone(params.input.patient.phone);
   const email = params.input.patient.email
     ? normalizeEmail(params.input.patient.email)
@@ -240,6 +323,31 @@ export async function bookPublicAppointment(
     timezone: clinic.timezone,
     bookedVia: "public",
     confirm: false,
+  });
+
+  // La notificacion es un efecto secundario de la reserva: si falla, la cita
+  // ya quedo creada y el paciente no debe recibir un error.
+  try {
+    await createPublicBookingNotifications(db, {
+      clinicId: clinic.id,
+      appointmentId: appointment.id,
+      patientId: appointment.patientId,
+      patientName: `${params.input.patient.firstName} ${params.input.patient.lastName}`.trim(),
+      serviceName: appointment.serviceNameSnapshot ?? "Consulta",
+      startsAt: appointment.startsAt,
+      endsAt: appointment.endsAt,
+    });
+  } catch (error) {
+    console.error("public_booking_notification_failed", error);
+  }
+
+  publishRealtime(clinic.id, "agenda", "appointment.requested", {
+    appointmentId: appointment.id,
+    patientId: appointment.patientId,
+  });
+  publishRealtime(clinic.id, "notifications", "notification.created", {
+    appointmentId: appointment.id,
+    patientId: appointment.patientId,
   });
 
   return {

@@ -18,6 +18,29 @@ const timezone = z.string().trim().min(1).max(80);
 const currency = z.string().trim().length(3).toUpperCase();
 const isoDate = z.iso.date();
 
+/** Convierte un nombre o una URL escrita por el usuario en un slug limpio. */
+export function normalizeClinicSlug(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/^\/+/, "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80);
+}
+
+const clinicSlug = z
+  .string()
+  .trim()
+  .min(1)
+  .max(120)
+  .transform(normalizeClinicSlug)
+  .refine((value) => value.length >= 2, {
+    message: "La URL debe tener al menos 2 caracteres",
+  });
+
 const coordinateFields = {
   latitude: z.number().min(-90).max(90).nullable().optional(),
   longitude: z.number().min(-180).max(180).nullable().optional(),
@@ -58,6 +81,7 @@ function validateCoordinates(
 export const createClinicBody = z
   .object({
     name: z.string().trim().min(1).max(160),
+    slug: clinicSlug.optional(),
     timezone: timezone.default("America/Mexico_City"),
     currency: currency.default("MXN"),
     ...coordinateFields,
@@ -72,6 +96,7 @@ export const createClinicBody = z
 export const updateClinicBody = z
   .object({
     name: z.string().trim().min(1).max(160).optional(),
+    slug: clinicSlug.optional(),
     timezone: timezone.optional(),
     currency: currency.optional(),
     ...coordinateFields,

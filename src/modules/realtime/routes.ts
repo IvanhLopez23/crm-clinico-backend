@@ -3,7 +3,12 @@ import type { Database } from "../../db/client.js";
 import { requirePermission } from "../../lib/require-permission.js";
 import { realtimeBus, type RealtimeTopic } from "./bus.js";
 
-const ALLOWED_TOPICS: RealtimeTopic[] = ["agenda", "sala", "patients"];
+const ALLOWED_TOPICS: RealtimeTopic[] = [
+  "agenda",
+  "sala",
+  "patients",
+  "notifications",
+];
 
 export const realtimeRoutes: FastifyPluginAsync<{ db: Database }> = async (
   app,
